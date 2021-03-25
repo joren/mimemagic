@@ -1,174 +1,125 @@
-require 'minitest/autorun'
+require 'bacon'
 require 'mimemagic'
 require 'stringio'
-require 'forwardable'
 
-class TestMimeMagic < Minitest::Test
-  # Do deep copy for constants of initial state.
-  INIT_EXTENSIONS = Marshal.load(Marshal.dump(MimeMagic::EXTENSIONS))
-  INIT_TYPES = Marshal.load(Marshal.dump(MimeMagic::TYPES))
-  INIT_MAGIC = Marshal.load(Marshal.dump(MimeMagic::MAGIC))
-
-  def setup
-    extentions = Marshal.load(Marshal.dump(INIT_EXTENSIONS))
-    types = Marshal.load(Marshal.dump(INIT_TYPES))
-    magic = Marshal.load(Marshal.dump(INIT_MAGIC))
-    MimeMagic.send(:remove_const, :EXTENSIONS) if MimeMagic.const_defined?(:EXTENSIONS)
-    MimeMagic.send(:remove_const, :TYPES) if MimeMagic.const_defined?(:TYPES)
-    MimeMagic.send(:remove_const, :MAGIC) if MimeMagic.const_defined?(:MAGIC)
-    MimeMagic.const_set('EXTENSIONS', extentions)
-    MimeMagic.const_set('TYPES', types)
-    MimeMagic.const_set('MAGIC', magic)
+describe 'MimeMagic' do
+  it 'should have type, mediatype and subtype' do
+    MimeMagic.new('text/html').type.should.equal 'text/html'
+    MimeMagic.new('text/html').mediatype.should.equal 'text'
+    MimeMagic.new('text/html').subtype.should.equal 'html'
   end
 
-  def test_have_type_mediatype_and_subtype
-    assert_equal 'text/html', MimeMagic.new('text/html').type
-    assert_equal 'text', MimeMagic.new('text/html').mediatype
-    assert_equal 'html', MimeMagic.new('text/html').subtype
+  it 'should have mediatype helpers' do
+    MimeMagic.new('text/plain').should.be.text
+    MimeMagic.new('text/html').should.be.text
+    MimeMagic.new('application/xhtml+xml').should.be.text
+    MimeMagic.new('application/octet-stream').should.not.be.text
+    MimeMagic.new('image/png').should.not.be.text
+    MimeMagic.new('image/png').should.be.image
+    MimeMagic.new('video/ogg').should.be.video
+    MimeMagic.new('audio/mpeg').should.be.audio
   end
 
-  def test_have_mediatype_helpers
-    assert MimeMagic.new('text/plain').text?
-    assert MimeMagic.new('text/html').text?
-    assert MimeMagic.new('application/xhtml+xml').text?
-    refute MimeMagic.new('application/octet-stream').text?
-    refute MimeMagic.new('image/png').text?
-    assert MimeMagic.new('image/png').image?
-    assert MimeMagic.new('video/ogg').video?
-    assert MimeMagic.new('audio/mpeg').audio?
+  it 'should have hierarchy' do
+    MimeMagic.new('text/html').should.be.child_of 'text/plain'
+    MimeMagic.new('text/x-java').should.be.child_of 'text/plain'
   end
 
-  def test_have_hierarchy
-    assert MimeMagic.new('text/html').child_of?('text/plain')
-    assert MimeMagic.new('text/x-java').child_of?('text/plain')
+  it 'should have extensions' do
+    MimeMagic.new('text/html').extensions.should.equal %w(htm html)
   end
 
-  def test_have_extensions
-    assert_equal %w(htm html), MimeMagic.new('text/html').extensions.sort
+  it 'should have comment' do
+    MimeMagic.new('text/html').comment.should.equal 'HTML document'
   end
 
-  def test_have_comment
-    assert_equal 'HTML document', MimeMagic.new('text/html').comment
+  it 'should recognize extensions' do
+    MimeMagic.by_extension('.html').should.equal 'text/html'
+    MimeMagic.by_extension('html').should.equal 'text/html'
+    MimeMagic.by_extension(:html).should.equal 'text/html'
+    MimeMagic.by_extension('rb').should.equal 'application/x-ruby'
+    MimeMagic.by_extension('crazy').should.equal nil
+    MimeMagic.by_extension('').should.equal nil
   end
 
-  def test_recognize_extensions
-    assert true
-
-    # Unknown if this test failure is expected. Commenting out for now.
-    #
-    # assert_equal 'text/html', MimeMagic.by_extension('.html').to_s
-    # assert_equal 'text/html', MimeMagic.by_extension('html').to_s
-    # assert_equal 'text/html', MimeMagic.by_extension(:html).to_s
-    # assert_equal 'application/x-ruby', MimeMagic.by_extension('rb').to_s
-    # assert_nil MimeMagic.by_extension('crazy')
-    # assert_nil MimeMagic.by_extension('')
+  it 'should recognize by a path' do
+    MimeMagic.by_path('/adsjkfa/kajsdfkadsf/kajsdfjasdf.html').should.equal 'text/html'
+    MimeMagic.by_path('something.html').should.equal 'text/html'
+    MimeMagic.by_path('wtf.rb').should.equal 'application/x-ruby'
+    MimeMagic.by_path('where/am.html/crazy').should.equal nil
+    MimeMagic.by_path('').should.equal nil
   end
 
-  def test_recognize_by_a_path
-    assert true
-
-    # Unknown if this test failure is expected. Commenting out for now.
-    #
-    # assert_equal 'text/html', MimeMagic.by_path('/adsjkfa/kajsdfkadsf/kajsdfjasdf.html').to_s
-    # assert_equal 'text/html', MimeMagic.by_path('something.html').to_s
-    # assert_equal 'application/x-ruby', MimeMagic.by_path('wtf.rb').to_s
-    # assert_nil MimeMagic.by_path('where/am.html/crazy')
-    # assert_nil MimeMagic.by_path('')
-  end
-
-  def test_recognize_xlsx_as_zip_without_magic
+  it 'should recognize xlsx as zip without magic' do
     file = "test/files/application.vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    %w(msoffice rubyxl gdocs).each do |variant|
-      file = "test/files/application.vnd.openxmlformats-officedocument.spreadsheetml{#{variant}}.sheet"
-      assert_equal "application/zip", MimeMagic.by_magic(File.read(file)).to_s
-      assert_equal "application/zip", MimeMagic.by_magic(File.open(file, 'rb')).to_s
+    MimeMagic.by_magic(File.read(file)).should.equal "application/zip"
+    MimeMagic.by_magic(File.open(file, 'rb')).should.equal "application/zip"
+  end
+
+  it 'should recognize by magic' do
+    require "mimemagic/overlay"
+    Dir['test/files/*'].each do |file|
+      mime = file[11..-1].sub('.', '/')
+      MimeMagic.by_magic(File.read(file)).should.equal mime
+      MimeMagic.by_magic(File.open(file, 'rb')).should.equal mime
     end
   end
 
-  def test_recognize_by_magic
-    assert true
-
-    # Unknown if this test failure is expected. Commenting out for now.
-    #
-    # Dir['test/files/*'].each do |file|
-    #   mime = file[11..-1].sub('.', '/').sub(/\{\w+\}/, '')
-    #   assert_equal mime, MimeMagic.by_magic(File.read(file)).to_s
-    #   assert_equal mime, MimeMagic.by_magic(File.open(file, 'rb')).to_s
-    # end
-  end
-
-  def test_recognize_all_by_magic
-    assert true
-
-    # Unknown if this test failure is expected. Commenting out for now.
-    #
-    # %w(msoffice rubyxl gdocs).each do |variant|
-    #   file = "test/files/application.vnd.openxmlformats-officedocument.spreadsheetml{#{variant}}.sheet"
-    #   mimes = %w[application/vnd.openxmlformats-officedocument.spreadsheetml.sheet application/zip]
-    #   assert_equal mimes, MimeMagic.all_by_magic(File.read(file)).map(&:type)
-    # end
-  end
-
-  def test_have_add
+  it 'should have add' do
     MimeMagic.add('application/mimemagic-test',
                   extensions: %w(ext1 ext2),
                   parents: 'application/xml',
                   comment: 'Comment')
-    assert_equal 'application/mimemagic-test', MimeMagic.by_extension('ext1').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_extension('ext2').to_s
-    assert_equal 'Comment', MimeMagic.by_extension('ext2').comment
-    assert_equal %w(ext1 ext2), MimeMagic.new('application/mimemagic-test').extensions
-    assert MimeMagic.new('application/mimemagic-test').child_of?('text/plain')
+    MimeMagic.by_extension('ext1').should.equal 'application/mimemagic-test'
+    MimeMagic.by_extension('ext2').should.equal 'application/mimemagic-test'
+    MimeMagic.by_extension('ext2').comment.should.equal 'Comment'
+    MimeMagic.new('application/mimemagic-test').extensions.should.equal %w(ext1 ext2)
+    MimeMagic.new('application/mimemagic-test').should.be.child_of 'text/plain'
   end
 
-  def test_process_magic
+  it 'should process magic' do
     MimeMagic.add('application/mimemagic-test',
                   magic: [[0, 'MAGICTEST'], # MAGICTEST at position 0
                              [1, 'MAGICTEST'], # MAGICTEST at position 1
                              [9..12, 'MAGICTEST'], # MAGICTEST starting at position 9 to 12
                              [2, 'MAGICTEST', [[0, 'X'], [0, 'Y']]]]) # MAGICTEST at position 2 and (X at 0 or Y at 0)
 
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic('MAGICTEST').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic('XMAGICTEST').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic(' MAGICTEST').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic('123456789MAGICTEST').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic('123456789ABMAGICTEST').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic('123456789ABCMAGICTEST').to_s
-    assert_nil MimeMagic.by_magic('123456789ABCDMAGICTEST')
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic('X MAGICTEST').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic('Y MAGICTEST').to_s
-    assert_nil MimeMagic.by_magic('Z MAGICTEST')
+    MimeMagic.by_magic('MAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic('XMAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic(' MAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic('123456789MAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic('123456789ABMAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic('123456789ABCMAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic('123456789ABCDMAGICTEST').should.equal nil
+    MimeMagic.by_magic('X MAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic('Y MAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic('Z MAGICTEST').should.equal nil
 
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic(StringIO.new 'MAGICTEST').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic(StringIO.new 'XMAGICTEST').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic(StringIO.new ' MAGICTEST').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic(StringIO.new '123456789MAGICTEST').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic(StringIO.new '123456789ABMAGICTEST').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic(StringIO.new '123456789ABCMAGICTEST').to_s
-    assert_nil MimeMagic.by_magic(StringIO.new '123456789ABCDMAGICTEST')
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic(StringIO.new 'X MAGICTEST').to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic(StringIO.new 'Y MAGICTEST').to_s
-    assert_nil MimeMagic.by_magic(StringIO.new 'Z MAGICTEST')
+    MimeMagic.by_magic(StringIO.new 'MAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic(StringIO.new 'XMAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic(StringIO.new ' MAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic(StringIO.new '123456789MAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic(StringIO.new '123456789ABMAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic(StringIO.new '123456789ABCMAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic(StringIO.new '123456789ABCDMAGICTEST').should.equal nil
+    MimeMagic.by_magic(StringIO.new 'X MAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic(StringIO.new 'Y MAGICTEST').should.equal 'application/mimemagic-test'
+    MimeMagic.by_magic(StringIO.new 'Z MAGICTEST').should.equal nil
   end
 
-  class IOObject
-    def initialize
-      @io = StringIO.new('MAGICTEST')
-    end
-
-    extend Forwardable
-    delegate [:read, :size, :rewind, :eof?, :close] => :@io
-  end
-
-  class StringableObject
-    def to_s
-      'MAGICTEST'
-    end
-  end
-
-  def test_handle_different_file_objects
+  it 'should handle different file objects' do
     MimeMagic.add('application/mimemagic-test', magic: [[0, 'MAGICTEST']])
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic(IOObject.new).to_s
-    assert_equal 'application/mimemagic-test', MimeMagic.by_magic(StringableObject.new).to_s
+    class ReadableObj
+      def read
+        'MAGICTEST'
+      end
+    end
+    MimeMagic.by_magic(ReadableObj.new).should.equal 'application/mimemagic-test'
+    class StringableObject
+      def to_s
+        'MAGICTEST'
+      end
+    end
+    MimeMagic.by_magic(StringableObject.new).should.equal 'application/mimemagic-test'
   end
 end
